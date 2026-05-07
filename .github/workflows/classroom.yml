@@ -1,0 +1,1043 @@
+# GitHub Classroom autograding workflow.
+# Le bloc autograding (steps Classroom + reporter) est régénéré par
+# update-autograding.sh en fonction des sous-paquets d'exercices
+# détectés. Ne pas éditer à la main le bloc entre marqueurs.
+name: GitHub Classroom Workflow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  build:
+    name: Autograding
+    if: github.repository != 'IUTInfoAix-R203/template-tp-java'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'zulu'
+          cache: maven
+
+      #@@@AUTOGRADING-BEGIN@@@ (bloc auto-généré par l'outillage enseignant, ne pas éditer à la main)
+      - name: Compilation
+        id: compilation
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: Compilation
+          setup-command: ""
+          command: ./mvnw -B -q compile
+          timeout: 5
+          max-score: 100
+
+      - name: Restaurer le cache des rapports Surefire
+        id: surefire_cache
+        uses: actions/cache/restore@v5
+        with:
+          path: target/surefire-reports
+          key: surefire-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            surefire-${{ github.ref_name }}-
+            surefire-main-
+
+      - name: Détecter les exercices impactés
+        id: scope
+        run: |
+          set +e
+          BEFORE="${{ github.event.before }}"
+          # Cache vide (premier run, expiration GHA) -> regrade complet sinon les
+          # XMLs absents donneraient un score 0 à tout le monde.
+          if [ ! -d target/surefire-reports ] || [ -z "$(ls -A target/surefire-reports 2>/dev/null)" ]; then
+            echo "filter=ALL" >> "$GITHUB_OUTPUT"
+            echo "reason=cache des rapports absent ou expiré" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Premier push sur la branche, ou commit base introuvable -> tout regrader
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "filter=ALL" >> "$GITHUB_OUTPUT"
+            echo "reason=premier push sur la branche ou commit base introuvable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Fichiers globaux : invalident le cache (regrade complet)
+          if git diff --name-only "$BEFORE" HEAD -- \
+              pom.xml \
+              '.github/workflows/**' \
+              '*.sh' \
+              'src/main/java/fr/univ_amu/iut/App.java' \
+              'src/main/java/fr/univ_amu/iut/module-info.java' \
+              'src/test/java/fr/univ_amu/iut/AppTest.java' \
+              | grep -q .; then
+            echo "filter=ALL" >> "$GITHUB_OUTPUT"
+            echo "reason=fichier global modifié (pom.xml / App / workflows / scripts)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Détection fine : paquets exerciceN / bonusN modifiés
+          pkgs=$(git diff --name-only "$BEFORE" HEAD -- \
+              'src/main/java/fr/univ_amu/iut/exercice*/**' \
+              'src/test/java/fr/univ_amu/iut/exercice*/**' \
+              'src/main/java/fr/univ_amu/iut/bonus*/**' \
+              'src/test/java/fr/univ_amu/iut/bonus*/**' \
+              | grep -oE 'fr/univ_amu/iut/(exercice[0-9]+|bonus[0-9]+)' \
+              | sort -u | tr '/' '.')
+          if [ -z "$pkgs" ]; then
+            echo "filter=NONE" >> "$GITHUB_OUTPUT"
+            echo "reason=aucune source d'exercice modifiée (mvnw test sauté, scores restaurés du cache)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Énumère les classes de test des paquets impactés (FQCN explicites)
+          classes=""
+          for pkg in $pkgs; do
+            pkg_dir="src/test/java/$(echo "$pkg" | tr '.' '/')"
+            while IFS= read -r f; do
+              cls=$(basename "$f" .java)
+              classes="${classes}${classes:+,}${pkg}.${cls}"
+            done < <(find "$pkg_dir" -type f -name '*.java' 2>/dev/null)
+          done
+          if [ -z "$classes" ]; then
+            echo "filter=NONE" >> "$GITHUB_OUTPUT"
+            echo "reason=paquets modifiés mais aucune classe de test trouvée" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "filter=$classes" >> "$GITHUB_OUTPUT"
+          echo "reason=paquets impactés : $(echo $pkgs | tr '\\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Lancer les tests impactés
+        id: run_tests
+        if: steps.scope.outputs.filter != 'NONE'
+        continue-on-error: true
+        run: |
+          echo "Scope : ${{ steps.scope.outputs.reason }}"
+          if [ "${{ steps.scope.outputs.filter }}" = "ALL" ]; then
+            ./mvnw -B test -DfailIfNoTests=false
+          else
+            ./mvnw -B test -Dtest='${{ steps.scope.outputs.filter }}' -DfailIfNoTests=false
+          fi
+
+      - name: "exercice1 : saluer_sans_nom_retourne_hello_world"
+        id: exercice1_saluer_sans_nom_retourne_hello_world
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : saluer_sans_nom_retourne_hello_world"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.HelloWorldTest saluer_sans_nom_retourne_hello_world
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice1 : saluer_chaine_vide_retourne_hello_world"
+        id: exercice1_saluer_chaine_vide_retourne_hello_world
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : saluer_chaine_vide_retourne_hello_world"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.HelloWorldTest saluer_chaine_vide_retourne_hello_world
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice1 : saluer_alice_retourne_hello_alice"
+        id: exercice1_saluer_alice_retourne_hello_alice
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : saluer_alice_retourne_hello_alice"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.HelloWorldTest saluer_alice_retourne_hello_alice
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice1 : saluer_bob_retourne_hello_bob"
+        id: exercice1_saluer_bob_retourne_hello_bob
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : saluer_bob_retourne_hello_bob"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.HelloWorldTest saluer_bob_retourne_hello_bob
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice1 : saluer_nom_une_lettre_retourne_hello_lettre"
+        id: exercice1_saluer_nom_une_lettre_retourne_hello_lettre
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : saluer_nom_une_lettre_retourne_hello_lettre"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.HelloWorldTest saluer_nom_une_lettre_retourne_hello_lettre
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice1 : saluer_eric_retourne_hello_eric"
+        id: exercice1_saluer_eric_retourne_hello_eric
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : saluer_eric_retourne_hello_eric"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.HelloWorldTest saluer_eric_retourne_hello_eric
+          timeout: 5
+          max-score: 25
+
+      - name: "exercice1 : saluer_jean_dupont_retourne_hello_jean_dupont"
+        id: exercice1_saluer_jean_dupont_retourne_hello_jean_dupont
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : saluer_jean_dupont_retourne_hello_jean_dupont"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.HelloWorldTest saluer_jean_dupont_retourne_hello_jean_dupont
+          timeout: 5
+          max-score: 25
+
+      - name: "exercice2 : fizz_buzz_de_1_retourne_1"
+        id: exercice2_fizz_buzz_de_1_retourne_1
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_1_retourne_1"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_1_retourne_1
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_2_retourne_2"
+        id: exercice2_fizz_buzz_de_2_retourne_2
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_2_retourne_2"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_2_retourne_2
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_3_retourne_fizz"
+        id: exercice2_fizz_buzz_de_3_retourne_fizz
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_3_retourne_fizz"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_3_retourne_fizz
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_4_retourne_4"
+        id: exercice2_fizz_buzz_de_4_retourne_4
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_4_retourne_4"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_4_retourne_4
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_5_retourne_buzz"
+        id: exercice2_fizz_buzz_de_5_retourne_buzz
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_5_retourne_buzz"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_5_retourne_buzz
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_6_retourne_fizz"
+        id: exercice2_fizz_buzz_de_6_retourne_fizz
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_6_retourne_fizz"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_6_retourne_fizz
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_9_retourne_fizz"
+        id: exercice2_fizz_buzz_de_9_retourne_fizz
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_9_retourne_fizz"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_9_retourne_fizz
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_10_retourne_buzz"
+        id: exercice2_fizz_buzz_de_10_retourne_buzz
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_10_retourne_buzz"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_10_retourne_buzz
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_de_15_retourne_fizz_buzz"
+        id: exercice2_fizz_buzz_de_15_retourne_fizz_buzz
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_de_15_retourne_fizz_buzz"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_de_15_retourne_fizz_buzz
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_jusqu_a_5_retourne_un_tableau_de_5_elements"
+        id: exercice2_fizz_buzz_jusqu_a_5_retourne_un_tableau_de_5_elements
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_jusqu_a_5_retourne_un_tableau_de_5_elements"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_jusqu_a_5_retourne_un_tableau_de_5_elements
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_jusqu_a_5_retourne_1_2_fizz_4_buzz"
+        id: exercice2_fizz_buzz_jusqu_a_5_retourne_1_2_fizz_4_buzz
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_jusqu_a_5_retourne_1_2_fizz_4_buzz"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_jusqu_a_5_retourne_1_2_fizz_4_buzz
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice2 : fizz_buzz_jusqu_a_15_correspond_aux_appels_individuels"
+        id: exercice2_fizz_buzz_jusqu_a_15_correspond_aux_appels_individuels
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : fizz_buzz_jusqu_a_15_correspond_aux_appels_individuels"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.FizzBuzzerTest fizz_buzz_jusqu_a_15_correspond_aux_appels_individuels
+          timeout: 5
+          max-score: 15
+
+      - name: "exercice3 : le_convertisseur_traduit_I_en_1"
+        id: exercice3_le_convertisseur_traduit_I_en_1
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_I_en_1"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_I_en_1
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_II_en_2"
+        id: exercice3_le_convertisseur_traduit_II_en_2
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_II_en_2"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_II_en_2
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_III_en_3"
+        id: exercice3_le_convertisseur_traduit_III_en_3
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_III_en_3"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_III_en_3
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_V_en_5"
+        id: exercice3_le_convertisseur_traduit_V_en_5
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_V_en_5"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_V_en_5
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_VI_en_6"
+        id: exercice3_le_convertisseur_traduit_VI_en_6
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_VI_en_6"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_VI_en_6
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_X_en_10"
+        id: exercice3_le_convertisseur_traduit_X_en_10
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_X_en_10"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_X_en_10
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_L_en_50"
+        id: exercice3_le_convertisseur_traduit_L_en_50
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_L_en_50"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_L_en_50
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_C_en_100"
+        id: exercice3_le_convertisseur_traduit_C_en_100
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_C_en_100"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_C_en_100
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_D_en_500"
+        id: exercice3_le_convertisseur_traduit_D_en_500
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_D_en_500"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_D_en_500
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_M_en_1000"
+        id: exercice3_le_convertisseur_traduit_M_en_1000
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_M_en_1000"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_M_en_1000
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_IV_en_4"
+        id: exercice3_le_convertisseur_traduit_IV_en_4
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_IV_en_4"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_IV_en_4
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_IX_en_9"
+        id: exercice3_le_convertisseur_traduit_IX_en_9
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_IX_en_9"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_IX_en_9
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_XL_en_40"
+        id: exercice3_le_convertisseur_traduit_XL_en_40
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_XL_en_40"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_XL_en_40
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_XC_en_90"
+        id: exercice3_le_convertisseur_traduit_XC_en_90
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_XC_en_90"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_XC_en_90
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_CD_en_400"
+        id: exercice3_le_convertisseur_traduit_CD_en_400
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_CD_en_400"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_CD_en_400
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_CM_en_900"
+        id: exercice3_le_convertisseur_traduit_CM_en_900
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_CM_en_900"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_CM_en_900
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_XLIX_en_49"
+        id: exercice3_le_convertisseur_traduit_XLIX_en_49
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_XLIX_en_49"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_XLIX_en_49
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_XCIX_en_99"
+        id: exercice3_le_convertisseur_traduit_XCIX_en_99
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_XCIX_en_99"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_XCIX_en_99
+          timeout: 5
+          max-score: 7
+
+      - name: "exercice3 : le_convertisseur_traduit_MMMMDCCCLXXXVIII_en_4888"
+        id: exercice3_le_convertisseur_traduit_MMMMDCCCLXXXVIII_en_4888
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_traduit_MMMMDCCCLXXXVIII_en_4888"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_traduit_MMMMDCCCLXXXVIII_en_4888
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_Z_leve_exception"
+        id: exercice3_le_convertisseur_avec_Z_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_Z_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_Z_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_IL_leve_exception"
+        id: exercice3_le_convertisseur_avec_IL_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_IL_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_IL_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_IC_leve_exception"
+        id: exercice3_le_convertisseur_avec_IC_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_IC_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_IC_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_ID_leve_exception"
+        id: exercice3_le_convertisseur_avec_ID_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_ID_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_ID_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_IM_leve_exception"
+        id: exercice3_le_convertisseur_avec_IM_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_IM_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_IM_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_VX_leve_exception"
+        id: exercice3_le_convertisseur_avec_VX_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_VX_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_VX_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_XD_leve_exception"
+        id: exercice3_le_convertisseur_avec_XD_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_XD_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_XD_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice3 : le_convertisseur_avec_XM_leve_exception"
+        id: exercice3_le_convertisseur_avec_XM_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_convertisseur_avec_XM_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.ConvertisseurDeNombreRomainTest le_convertisseur_avec_XM_leve_exception
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice4 : le_robot_memorise_position"
+        id: exercice4_le_robot_memorise_position
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_memorise_position"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_memorise_position
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_memorise_orientation"
+        id: exercice4_le_robot_memorise_orientation
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_memorise_orientation"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_memorise_orientation
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_droite_depuis_nord_donne_est"
+        id: exercice4_le_robot_tourne_a_droite_depuis_nord_donne_est
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_droite_depuis_nord_donne_est"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_droite_depuis_nord_donne_est
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_droite_depuis_est_donne_sud"
+        id: exercice4_le_robot_tourne_a_droite_depuis_est_donne_sud
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_droite_depuis_est_donne_sud"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_droite_depuis_est_donne_sud
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_droite_depuis_sud_donne_ouest"
+        id: exercice4_le_robot_tourne_a_droite_depuis_sud_donne_ouest
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_droite_depuis_sud_donne_ouest"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_droite_depuis_sud_donne_ouest
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_droite_depuis_ouest_donne_nord"
+        id: exercice4_le_robot_tourne_a_droite_depuis_ouest_donne_nord
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_droite_depuis_ouest_donne_nord"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_droite_depuis_ouest_donne_nord
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_droite_sans_changer_la_position"
+        id: exercice4_le_robot_tourne_a_droite_sans_changer_la_position
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_droite_sans_changer_la_position"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_droite_sans_changer_la_position
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_gauche_depuis_nord_donne_ouest"
+        id: exercice4_le_robot_tourne_a_gauche_depuis_nord_donne_ouest
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_gauche_depuis_nord_donne_ouest"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_gauche_depuis_nord_donne_ouest
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_gauche_depuis_ouest_donne_sud"
+        id: exercice4_le_robot_tourne_a_gauche_depuis_ouest_donne_sud
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_gauche_depuis_ouest_donne_sud"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_gauche_depuis_ouest_donne_sud
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice4 : le_robot_tourne_a_gauche_depuis_sud_donne_est"
+        id: exercice4_le_robot_tourne_a_gauche_depuis_sud_donne_est
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_gauche_depuis_sud_donne_est"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_gauche_depuis_sud_donne_est
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_robot_tourne_a_gauche_depuis_est_donne_nord"
+        id: exercice4_le_robot_tourne_a_gauche_depuis_est_donne_nord
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_tourne_a_gauche_depuis_est_donne_nord"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_tourne_a_gauche_depuis_est_donne_nord
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_robot_avance_vers_le_nord_augmente_y"
+        id: exercice4_le_robot_avance_vers_le_nord_augmente_y
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_avance_vers_le_nord_augmente_y"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_avance_vers_le_nord_augmente_y
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_robot_avance_vers_l_est_augmente_x"
+        id: exercice4_le_robot_avance_vers_l_est_augmente_x
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_avance_vers_l_est_augmente_x"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_avance_vers_l_est_augmente_x
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_robot_avance_vers_le_sud_diminue_y"
+        id: exercice4_le_robot_avance_vers_le_sud_diminue_y
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_avance_vers_le_sud_diminue_y"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_avance_vers_le_sud_diminue_y
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_robot_avance_vers_l_ouest_diminue_x"
+        id: exercice4_le_robot_avance_vers_l_ouest_diminue_x
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_avance_vers_l_ouest_diminue_x"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_avance_vers_l_ouest_diminue_x
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_robot_avance_sans_changer_l_orientation"
+        id: exercice4_le_robot_avance_sans_changer_l_orientation
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_robot_avance_sans_changer_l_orientation"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_robot_avance_sans_changer_l_orientation
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_simulateur_execute_raalal_depuis_7_3_nord_donne_position_9_4_ouest"
+        id: exercice4_le_simulateur_execute_raalal_depuis_7_3_nord_donne_position_9_4_ouest
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_simulateur_execute_raalal_depuis_7_3_nord_donne_position_9_4_ouest"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_simulateur_execute_raalal_depuis_7_3_nord_donne_position_9_4_ouest
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_simulateur_execute_sequence_vide_sans_rien_modifier"
+        id: exercice4_le_simulateur_execute_sequence_vide_sans_rien_modifier
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_simulateur_execute_sequence_vide_sans_rien_modifier"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_simulateur_execute_sequence_vide_sans_rien_modifier
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice4 : le_simulateur_avec_commande_inconnue_leve_exception"
+        id: exercice4_le_simulateur_avec_commande_inconnue_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : le_simulateur_avec_commande_inconnue_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.RobotTest le_simulateur_avec_commande_inconnue_leve_exception
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice5 : la_grille_vide_est_correctement_annotee"
+        id: exercice5_la_grille_vide_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_vide_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_vide_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_1_x_1_sans_mine_est_correctement_annotee"
+        id: exercice5_la_grille_1_x_1_sans_mine_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_1_x_1_sans_mine_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_1_x_1_sans_mine_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_1_x_1_avec_mine_est_correctement_annotee"
+        id: exercice5_la_grille_1_x_1_avec_mine_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_1_x_1_avec_mine_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_1_x_1_avec_mine_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_1_x_2_avec_mine_et_case_vide_est_correctement_annotee"
+        id: exercice5_la_grille_1_x_2_avec_mine_et_case_vide_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_1_x_2_avec_mine_et_case_vide_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_1_x_2_avec_mine_et_case_vide_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_sans_mine_est_correctement_annotee"
+        id: exercice5_la_grille_sans_mine_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_sans_mine_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_sans_mine_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_pleine_de_mines_est_correctement_annotee"
+        id: exercice5_la_grille_pleine_de_mines_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_pleine_de_mines_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_pleine_de_mines_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_avec_une_mine_dans_le_coin_haut_gauche_est_correctement_annotee"
+        id: exercice5_la_grille_avec_une_mine_dans_le_coin_haut_gauche_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_avec_une_mine_dans_le_coin_haut_gauche_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_avec_une_mine_dans_le_coin_haut_gauche_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_avec_une_mine_dans_le_coin_bas_droit_est_correctement_annotee"
+        id: exercice5_la_grille_avec_une_mine_dans_le_coin_bas_droit_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_avec_une_mine_dans_le_coin_bas_droit_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_avec_une_mine_dans_le_coin_bas_droit_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_avec_une_mine_unique_au_centre_est_correctement_annotee"
+        id: exercice5_la_grille_avec_une_mine_unique_au_centre_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_avec_une_mine_unique_au_centre_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_avec_une_mine_unique_au_centre_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_avec_mines_sur_le_pourtour_est_correctement_annotee"
+        id: exercice5_la_grille_avec_mines_sur_le_pourtour_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_avec_mines_sur_le_pourtour_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_avec_mines_sur_le_pourtour_est_correctement_annotee
+          timeout: 5
+          max-score: 11
+
+      - name: "exercice5 : la_grille_d_une_seule_ligne_avec_deux_mines_est_correctement_annotee"
+        id: exercice5_la_grille_d_une_seule_ligne_avec_deux_mines_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_d_une_seule_ligne_avec_deux_mines_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_d_une_seule_ligne_avec_deux_mines_est_correctement_annotee
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice5 : la_grille_d_une_seule_colonne_avec_deux_mines_est_correctement_annotee"
+        id: exercice5_la_grille_d_une_seule_colonne_avec_deux_mines_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_d_une_seule_colonne_avec_deux_mines_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_d_une_seule_colonne_avec_deux_mines_est_correctement_annotee
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice5 : la_grille_avec_mines_en_croix_est_correctement_annotee"
+        id: exercice5_la_grille_avec_mines_en_croix_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_avec_mines_en_croix_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_avec_mines_en_croix_est_correctement_annotee
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice5 : la_grille_null_leve_exception"
+        id: exercice5_la_grille_null_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_null_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_null_leve_exception
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice5 : la_grille_avec_symbole_inconnu_leve_exception"
+        id: exercice5_la_grille_avec_symbole_inconnu_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_avec_symbole_inconnu_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_avec_symbole_inconnu_leve_exception
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice5 : la_grille_avec_lignes_de_tailles_differentes_leve_exception"
+        id: exercice5_la_grille_avec_lignes_de_tailles_differentes_leve_exception
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grille_avec_lignes_de_tailles_differentes_leve_exception"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grille_avec_lignes_de_tailles_differentes_leve_exception
+          timeout: 5
+          max-score: 10
+
+      - name: "exercice5 : la_grande_grille_est_correctement_annotee"
+        id: exercice5_la_grande_grille_est_correctement_annotee
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grande_grille_est_correctement_annotee"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.GrilleDemineurTest la_grande_grille_est_correctement_annotee
+          timeout: 5
+          max-score: 10
+
+      - name: Autograding Reporter
+        uses: IUTInfoAix-R202/autograding-grading-reporter@main
+        continue-on-error: true
+        env:
+          COMPILATION_RESULTS: "${{ steps.compilation.outputs.result }}"
+          EXERCICE1_SALUER_SANS_NOM_RETOURNE_HELLO_WORLD_RESULTS: "${{ steps.exercice1_saluer_sans_nom_retourne_hello_world.outputs.result }}"
+          EXERCICE1_SALUER_CHAINE_VIDE_RETOURNE_HELLO_WORLD_RESULTS: "${{ steps.exercice1_saluer_chaine_vide_retourne_hello_world.outputs.result }}"
+          EXERCICE1_SALUER_ALICE_RETOURNE_HELLO_ALICE_RESULTS: "${{ steps.exercice1_saluer_alice_retourne_hello_alice.outputs.result }}"
+          EXERCICE1_SALUER_BOB_RETOURNE_HELLO_BOB_RESULTS: "${{ steps.exercice1_saluer_bob_retourne_hello_bob.outputs.result }}"
+          EXERCICE1_SALUER_NOM_UNE_LETTRE_RETOURNE_HELLO_LETTRE_RESULTS: "${{ steps.exercice1_saluer_nom_une_lettre_retourne_hello_lettre.outputs.result }}"
+          EXERCICE1_SALUER_ERIC_RETOURNE_HELLO_ERIC_RESULTS: "${{ steps.exercice1_saluer_eric_retourne_hello_eric.outputs.result }}"
+          EXERCICE1_SALUER_JEAN_DUPONT_RETOURNE_HELLO_JEAN_DUPONT_RESULTS: "${{ steps.exercice1_saluer_jean_dupont_retourne_hello_jean_dupont.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_1_RETOURNE_1_RESULTS: "${{ steps.exercice2_fizz_buzz_de_1_retourne_1.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_2_RETOURNE_2_RESULTS: "${{ steps.exercice2_fizz_buzz_de_2_retourne_2.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_3_RETOURNE_FIZZ_RESULTS: "${{ steps.exercice2_fizz_buzz_de_3_retourne_fizz.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_4_RETOURNE_4_RESULTS: "${{ steps.exercice2_fizz_buzz_de_4_retourne_4.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_5_RETOURNE_BUZZ_RESULTS: "${{ steps.exercice2_fizz_buzz_de_5_retourne_buzz.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_6_RETOURNE_FIZZ_RESULTS: "${{ steps.exercice2_fizz_buzz_de_6_retourne_fizz.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_9_RETOURNE_FIZZ_RESULTS: "${{ steps.exercice2_fizz_buzz_de_9_retourne_fizz.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_10_RETOURNE_BUZZ_RESULTS: "${{ steps.exercice2_fizz_buzz_de_10_retourne_buzz.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_DE_15_RETOURNE_FIZZ_BUZZ_RESULTS: "${{ steps.exercice2_fizz_buzz_de_15_retourne_fizz_buzz.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_JUSQU_A_5_RETOURNE_UN_TABLEAU_DE_5_ELEMENTS_RESULTS: "${{ steps.exercice2_fizz_buzz_jusqu_a_5_retourne_un_tableau_de_5_elements.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_JUSQU_A_5_RETOURNE_1_2_FIZZ_4_BUZZ_RESULTS: "${{ steps.exercice2_fizz_buzz_jusqu_a_5_retourne_1_2_fizz_4_buzz.outputs.result }}"
+          EXERCICE2_FIZZ_BUZZ_JUSQU_A_15_CORRESPOND_AUX_APPELS_INDIVIDUELS_RESULTS: "${{ steps.exercice2_fizz_buzz_jusqu_a_15_correspond_aux_appels_individuels.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_I_EN_1_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_I_en_1.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_II_EN_2_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_II_en_2.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_III_EN_3_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_III_en_3.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_V_EN_5_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_V_en_5.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_VI_EN_6_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_VI_en_6.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_X_EN_10_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_X_en_10.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_L_EN_50_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_L_en_50.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_C_EN_100_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_C_en_100.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_D_EN_500_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_D_en_500.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_M_EN_1000_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_M_en_1000.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_IV_EN_4_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_IV_en_4.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_IX_EN_9_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_IX_en_9.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_XL_EN_40_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_XL_en_40.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_XC_EN_90_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_XC_en_90.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_CD_EN_400_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_CD_en_400.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_CM_EN_900_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_CM_en_900.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_XLIX_EN_49_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_XLIX_en_49.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_XCIX_EN_99_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_XCIX_en_99.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_TRADUIT_MMMMDCCCLXXXVIII_EN_4888_RESULTS: "${{ steps.exercice3_le_convertisseur_traduit_MMMMDCCCLXXXVIII_en_4888.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_Z_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_Z_leve_exception.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_IL_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_IL_leve_exception.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_IC_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_IC_leve_exception.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_ID_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_ID_leve_exception.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_IM_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_IM_leve_exception.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_VX_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_VX_leve_exception.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_XD_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_XD_leve_exception.outputs.result }}"
+          EXERCICE3_LE_CONVERTISSEUR_AVEC_XM_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice3_le_convertisseur_avec_XM_leve_exception.outputs.result }}"
+          EXERCICE4_LE_ROBOT_MEMORISE_POSITION_RESULTS: "${{ steps.exercice4_le_robot_memorise_position.outputs.result }}"
+          EXERCICE4_LE_ROBOT_MEMORISE_ORIENTATION_RESULTS: "${{ steps.exercice4_le_robot_memorise_orientation.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_DROITE_DEPUIS_NORD_DONNE_EST_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_droite_depuis_nord_donne_est.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_DROITE_DEPUIS_EST_DONNE_SUD_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_droite_depuis_est_donne_sud.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_DROITE_DEPUIS_SUD_DONNE_OUEST_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_droite_depuis_sud_donne_ouest.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_DROITE_DEPUIS_OUEST_DONNE_NORD_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_droite_depuis_ouest_donne_nord.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_DROITE_SANS_CHANGER_LA_POSITION_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_droite_sans_changer_la_position.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_GAUCHE_DEPUIS_NORD_DONNE_OUEST_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_gauche_depuis_nord_donne_ouest.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_GAUCHE_DEPUIS_OUEST_DONNE_SUD_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_gauche_depuis_ouest_donne_sud.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_GAUCHE_DEPUIS_SUD_DONNE_EST_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_gauche_depuis_sud_donne_est.outputs.result }}"
+          EXERCICE4_LE_ROBOT_TOURNE_A_GAUCHE_DEPUIS_EST_DONNE_NORD_RESULTS: "${{ steps.exercice4_le_robot_tourne_a_gauche_depuis_est_donne_nord.outputs.result }}"
+          EXERCICE4_LE_ROBOT_AVANCE_VERS_LE_NORD_AUGMENTE_Y_RESULTS: "${{ steps.exercice4_le_robot_avance_vers_le_nord_augmente_y.outputs.result }}"
+          EXERCICE4_LE_ROBOT_AVANCE_VERS_L_EST_AUGMENTE_X_RESULTS: "${{ steps.exercice4_le_robot_avance_vers_l_est_augmente_x.outputs.result }}"
+          EXERCICE4_LE_ROBOT_AVANCE_VERS_LE_SUD_DIMINUE_Y_RESULTS: "${{ steps.exercice4_le_robot_avance_vers_le_sud_diminue_y.outputs.result }}"
+          EXERCICE4_LE_ROBOT_AVANCE_VERS_L_OUEST_DIMINUE_X_RESULTS: "${{ steps.exercice4_le_robot_avance_vers_l_ouest_diminue_x.outputs.result }}"
+          EXERCICE4_LE_ROBOT_AVANCE_SANS_CHANGER_L_ORIENTATION_RESULTS: "${{ steps.exercice4_le_robot_avance_sans_changer_l_orientation.outputs.result }}"
+          EXERCICE4_LE_SIMULATEUR_EXECUTE_RAALAL_DEPUIS_7_3_NORD_DONNE_POSITION_9_4_OUEST_RESULTS: "${{ steps.exercice4_le_simulateur_execute_raalal_depuis_7_3_nord_donne_position_9_4_ouest.outputs.result }}"
+          EXERCICE4_LE_SIMULATEUR_EXECUTE_SEQUENCE_VIDE_SANS_RIEN_MODIFIER_RESULTS: "${{ steps.exercice4_le_simulateur_execute_sequence_vide_sans_rien_modifier.outputs.result }}"
+          EXERCICE4_LE_SIMULATEUR_AVEC_COMMANDE_INCONNUE_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice4_le_simulateur_avec_commande_inconnue_leve_exception.outputs.result }}"
+          EXERCICE5_LA_GRILLE_VIDE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_vide_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_1_X_1_SANS_MINE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_1_x_1_sans_mine_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_1_X_1_AVEC_MINE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_1_x_1_avec_mine_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_1_X_2_AVEC_MINE_ET_CASE_VIDE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_1_x_2_avec_mine_et_case_vide_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_SANS_MINE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_sans_mine_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_PLEINE_DE_MINES_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_pleine_de_mines_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_AVEC_UNE_MINE_DANS_LE_COIN_HAUT_GAUCHE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_avec_une_mine_dans_le_coin_haut_gauche_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_AVEC_UNE_MINE_DANS_LE_COIN_BAS_DROIT_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_avec_une_mine_dans_le_coin_bas_droit_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_AVEC_UNE_MINE_UNIQUE_AU_CENTRE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_avec_une_mine_unique_au_centre_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_AVEC_MINES_SUR_LE_POURTOUR_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_avec_mines_sur_le_pourtour_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_D_UNE_SEULE_LIGNE_AVEC_DEUX_MINES_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_d_une_seule_ligne_avec_deux_mines_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_D_UNE_SEULE_COLONNE_AVEC_DEUX_MINES_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_d_une_seule_colonne_avec_deux_mines_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_AVEC_MINES_EN_CROIX_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grille_avec_mines_en_croix_est_correctement_annotee.outputs.result }}"
+          EXERCICE5_LA_GRILLE_NULL_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice5_la_grille_null_leve_exception.outputs.result }}"
+          EXERCICE5_LA_GRILLE_AVEC_SYMBOLE_INCONNU_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice5_la_grille_avec_symbole_inconnu_leve_exception.outputs.result }}"
+          EXERCICE5_LA_GRILLE_AVEC_LIGNES_DE_TAILLES_DIFFERENTES_LEVE_EXCEPTION_RESULTS: "${{ steps.exercice5_la_grille_avec_lignes_de_tailles_differentes_leve_exception.outputs.result }}"
+          EXERCICE5_LA_GRANDE_GRILLE_EST_CORRECTEMENT_ANNOTEE_RESULTS: "${{ steps.exercice5_la_grande_grille_est_correctement_annotee.outputs.result }}"
+        with:
+          runners: compilation,exercice1_saluer_sans_nom_retourne_hello_world,exercice1_saluer_chaine_vide_retourne_hello_world,exercice1_saluer_alice_retourne_hello_alice,exercice1_saluer_bob_retourne_hello_bob,exercice1_saluer_nom_une_lettre_retourne_hello_lettre,exercice1_saluer_eric_retourne_hello_eric,exercice1_saluer_jean_dupont_retourne_hello_jean_dupont,exercice2_fizz_buzz_de_1_retourne_1,exercice2_fizz_buzz_de_2_retourne_2,exercice2_fizz_buzz_de_3_retourne_fizz,exercice2_fizz_buzz_de_4_retourne_4,exercice2_fizz_buzz_de_5_retourne_buzz,exercice2_fizz_buzz_de_6_retourne_fizz,exercice2_fizz_buzz_de_9_retourne_fizz,exercice2_fizz_buzz_de_10_retourne_buzz,exercice2_fizz_buzz_de_15_retourne_fizz_buzz,exercice2_fizz_buzz_jusqu_a_5_retourne_un_tableau_de_5_elements,exercice2_fizz_buzz_jusqu_a_5_retourne_1_2_fizz_4_buzz,exercice2_fizz_buzz_jusqu_a_15_correspond_aux_appels_individuels,exercice3_le_convertisseur_traduit_I_en_1,exercice3_le_convertisseur_traduit_II_en_2,exercice3_le_convertisseur_traduit_III_en_3,exercice3_le_convertisseur_traduit_V_en_5,exercice3_le_convertisseur_traduit_VI_en_6,exercice3_le_convertisseur_traduit_X_en_10,exercice3_le_convertisseur_traduit_L_en_50,exercice3_le_convertisseur_traduit_C_en_100,exercice3_le_convertisseur_traduit_D_en_500,exercice3_le_convertisseur_traduit_M_en_1000,exercice3_le_convertisseur_traduit_IV_en_4,exercice3_le_convertisseur_traduit_IX_en_9,exercice3_le_convertisseur_traduit_XL_en_40,exercice3_le_convertisseur_traduit_XC_en_90,exercice3_le_convertisseur_traduit_CD_en_400,exercice3_le_convertisseur_traduit_CM_en_900,exercice3_le_convertisseur_traduit_XLIX_en_49,exercice3_le_convertisseur_traduit_XCIX_en_99,exercice3_le_convertisseur_traduit_MMMMDCCCLXXXVIII_en_4888,exercice3_le_convertisseur_avec_Z_leve_exception,exercice3_le_convertisseur_avec_IL_leve_exception,exercice3_le_convertisseur_avec_IC_leve_exception,exercice3_le_convertisseur_avec_ID_leve_exception,exercice3_le_convertisseur_avec_IM_leve_exception,exercice3_le_convertisseur_avec_VX_leve_exception,exercice3_le_convertisseur_avec_XD_leve_exception,exercice3_le_convertisseur_avec_XM_leve_exception,exercice4_le_robot_memorise_position,exercice4_le_robot_memorise_orientation,exercice4_le_robot_tourne_a_droite_depuis_nord_donne_est,exercice4_le_robot_tourne_a_droite_depuis_est_donne_sud,exercice4_le_robot_tourne_a_droite_depuis_sud_donne_ouest,exercice4_le_robot_tourne_a_droite_depuis_ouest_donne_nord,exercice4_le_robot_tourne_a_droite_sans_changer_la_position,exercice4_le_robot_tourne_a_gauche_depuis_nord_donne_ouest,exercice4_le_robot_tourne_a_gauche_depuis_ouest_donne_sud,exercice4_le_robot_tourne_a_gauche_depuis_sud_donne_est,exercice4_le_robot_tourne_a_gauche_depuis_est_donne_nord,exercice4_le_robot_avance_vers_le_nord_augmente_y,exercice4_le_robot_avance_vers_l_est_augmente_x,exercice4_le_robot_avance_vers_le_sud_diminue_y,exercice4_le_robot_avance_vers_l_ouest_diminue_x,exercice4_le_robot_avance_sans_changer_l_orientation,exercice4_le_simulateur_execute_raalal_depuis_7_3_nord_donne_position_9_4_ouest,exercice4_le_simulateur_execute_sequence_vide_sans_rien_modifier,exercice4_le_simulateur_avec_commande_inconnue_leve_exception,exercice5_la_grille_vide_est_correctement_annotee,exercice5_la_grille_1_x_1_sans_mine_est_correctement_annotee,exercice5_la_grille_1_x_1_avec_mine_est_correctement_annotee,exercice5_la_grille_1_x_2_avec_mine_et_case_vide_est_correctement_annotee,exercice5_la_grille_sans_mine_est_correctement_annotee,exercice5_la_grille_pleine_de_mines_est_correctement_annotee,exercice5_la_grille_avec_une_mine_dans_le_coin_haut_gauche_est_correctement_annotee,exercice5_la_grille_avec_une_mine_dans_le_coin_bas_droit_est_correctement_annotee,exercice5_la_grille_avec_une_mine_unique_au_centre_est_correctement_annotee,exercice5_la_grille_avec_mines_sur_le_pourtour_est_correctement_annotee,exercice5_la_grille_d_une_seule_ligne_avec_deux_mines_est_correctement_annotee,exercice5_la_grille_d_une_seule_colonne_avec_deux_mines_est_correctement_annotee,exercice5_la_grille_avec_mines_en_croix_est_correctement_annotee,exercice5_la_grille_null_leve_exception,exercice5_la_grille_avec_symbole_inconnu_leve_exception,exercice5_la_grille_avec_lignes_de_tailles_differentes_leve_exception,exercice5_la_grande_grille_est_correctement_annotee
+
+      - name: Sauvegarder le cache des rapports Surefire
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: target/surefire-reports
+          key: surefire-${{ github.ref_name }}-${{ github.sha }}
+      #@@@AUTOGRADING-END@@@
