@@ -36,6 +36,7 @@ public class ConvertisseurDeNombreRomain {
    */
   public int enNombreArabe(String chiffreRomain) {
     int total = 0;
+
     // TODO exercice 3 : remplir total en parcourant la chaîne.
     //
     // Activez les tests un par un. Commencez par "I" = 1 (fake it en
@@ -47,6 +48,60 @@ public class ConvertisseurDeNombreRomain {
     //
     // Pour les exceptions : une soustraction est valide seulement pour
     // I avant V/X, X avant L/C, C avant D/M. Tout le reste est invalide.
+
+    for (int i = 0; i < chiffreRomain.length(); i++) {
+
+      int valeurCourante = valeurDe(chiffreRomain.charAt(i));
+
+      int valeurSuivante =
+          (i + 1 < chiffreRomain.length()) ? valeurDe(chiffreRomain.charAt(i + 1)) : 0;
+
+      if (valeurCourante < valeurSuivante) {
+
+        // Soustraction : le symbole courant est plus petit que le suivant.
+        // On valide d'abord que cette soustraction est autorisée.
+        verifierSoustractionValide(chiffreRomain.charAt(i), chiffreRomain.charAt(i + 1));
+
+        total -= valeurCourante;
+
+      } else {
+
+        total += valeurCourante;
+      }
+    }
+
     return total;
+  }
+
+  private int valeurDe(char symbole) {
+
+    return switch (symbole) {
+      case 'I' -> 1;
+      case 'V' -> 5;
+      case 'X' -> 10;
+      case 'L' -> 50;
+      case 'C' -> 100;
+      case 'D' -> 500;
+      case 'M' -> 1000;
+
+      default -> throw new IllegalArgumentException("Symbole romain inconnu : '" + symbole + "'");
+    };
+  }
+
+  private void verifierSoustractionValide(char petit, char grand) {
+
+    boolean valide =
+        switch (petit) {
+          case 'I' -> grand == 'V' || grand == 'X';
+          case 'X' -> grand == 'L' || grand == 'C';
+          case 'C' -> grand == 'D' || grand == 'M';
+
+          default -> false; // V, L, D ne peuvent jamais être soustraits
+        };
+
+    if (!valide) {
+      throw new IllegalArgumentException(
+          "Soustraction invalide : " + petit + " ne peut pas précéder " + grand + "'");
+    }
   }
 }
